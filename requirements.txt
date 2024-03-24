@@ -1,0 +1,8 @@
+kornia==0.5.8
+matplotlib==3.4.3
+mmcv==1.4.0
+Pillow==7.1.2
+prettytable==3.10.0
+proplot==0.9.7
+timm==0.9.16
+yapf==0.40.1
