@@ -1,4 +1,5 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+# 修改vaihingen数据训练集为ISPRS_semantic_labeling_Vaihingen/top下的图片，之前是已经分割后的数据
 import argparse
 import glob
 import math
@@ -124,26 +125,31 @@ def main():
             zip_file = zipfile.ZipFile(zipp)
             zip_file.extractall(tmp_dir)
             src_path_list = glob.glob(os.path.join(tmp_dir, '*.tif'))
-            if 'ISPRS_semantic_labeling_Vaihingen' in zipp:
-                src_path_list = glob.glob(
-                    os.path.join(os.path.join(tmp_dir, 'top'), '*.tif'))
-            if 'ISPRS_semantic_labeling_Vaihingen_ground_truth_eroded_COMPLETE' in zipp:  # noqa
-                src_path_list = glob.glob(os.path.join(tmp_dir, '*.tif'))
-                # delete unused area9 ground truth
-                for area_ann in src_path_list:
-                    if 'area9' in area_ann:
-                        src_path_list.remove(area_ann)
-            prog_bar = mmcv.ProgressBar(len(src_path_list))
-            for i, src_path in enumerate(src_path_list):
-                area_idx = osp.basename(src_path).split('_')[3].strip('.tif')
-                data_type = 'train' if area_idx in splits['train'] else 'val'
-                if 'noBoundary' in src_path:
-                    dst_dir = osp.join(out_dir, 'ann_dir', data_type)
-                    clip_big_image(src_path, dst_dir, to_label=True)
-                else:
-                    dst_dir = osp.join(out_dir, 'img_dir', data_type)
-                    clip_big_image(src_path, dst_dir, to_label=False)
-                prog_bar.update()
+            if 'ISPRS_semantic_labeling_Vaihingen'or 'ISPRS_semantic_labeling_Vaihingen_ground_truth_eroded_COMPLETE' in zipp:
+                if 'ISPRS_semantic_labeling_Vaihingen' in zipp:
+                    src_path_list = glob.glob(
+                        os.path.join(os.path.join(tmp_dir, 'top'), '*.tif'))
+                    for i, src_path in enumerate(src_path_list):
+                        area_idx = osp.basename(src_path).split('_')[3].strip('.tif')
+                        data_type = 'train' if area_idx in splits['train'] else 'val'
+                        dst_dir = osp.join(out_dir, 'img_dir', data_type)
+                        clip_big_image(src_path, dst_dir, to_label=False)
+                        prog_bar.update()
+                if 'ISPRS_semantic_labeling_Vaihingen_ground_truth_eroded_COMPLETE' in zipp:  # noqa
+                    src_path_list = glob.glob(os.path.join(tmp_dir, '*.tif'))
+                    # delete unused area9 ground truth
+                    for area_ann in src_path_list:
+                        if 'area9' in area_ann:
+                            src_path_list.remove(area_ann)
+                    for i, src_path in enumerate(src_path_list):
+                        area_idx = osp.basename(src_path).split('_')[3].strip('.tif')
+                        data_type = 'train' if area_idx in splits['train'] else 'val'
+                        if 'noBoundary' in src_path:
+                            dst_dir = osp.join(out_dir, 'ann_dir', data_type)
+                            clip_big_image(src_path, dst_dir, to_label=True)
+                        prog_bar.update()
+                prog_bar = mmcv.ProgressBar(len(src_path_list))
+
 
         print('Removing the temporary files...')
 

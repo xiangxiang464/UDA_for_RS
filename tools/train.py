@@ -70,11 +70,11 @@ def parse_args(args):
 
 def main(args):
     args = parse_args(args)
-
+    # 解析命令行参数并读取配置文件。如果命令行参数中有自定义的选项，则将其与配置文件中的选项进行合并。
     cfg = Config.fromfile(args.config)
     if args.options is not None:
         cfg.merge_from_dict(args.options)
-    # set cudnn_benchmark
+    # set cudnn_benchmark, 自动调整卷积算法的模式,提升显卡性能
     if cfg.get('cudnn_benchmark', False):
         torch.backends.cudnn.benchmark = True
 
