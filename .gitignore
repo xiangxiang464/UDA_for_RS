@@ -1,7 +1,0 @@
-/data
-/pretrained
-/work_dirs
-*.zip
-*.gz
-*.pth
-*.7z
