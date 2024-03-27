@@ -123,10 +123,10 @@ class DACS(UDADecorator):
 
         masks = torch.stack([(labels == c) for \
             c in range(self.num_classes)]).squeeze(2) # (num_class, bs, H, W)
-        freq = masks.sum(dim=(2,3)) / masks.sum(dim=(0,2,3)) # (num_class, bs)
+        freq = (masks.sum(dim=(2,3))+1e-6) / (masks.sum(dim=(0,2,3))+1e-6) # (num_class, bs)
         e_1_minus_freq = torch.exp( (1-freq+1e-6)/T )
         cur_class_weights = e_1_minus_freq / e_1_minus_freq.sum(dim=0) * self.num_classes # (num_class, bs)
-        assert not torch.isnan(cur_class_weights).any(), 'freq : {}\ne_1_minus_freq: {}'.format(freq, e_1_minus_freq)
+        assert not torch.isnan(cur_class_weights).any(), 'freq : {}\ne_1_minus_freq: {}'.format(freq+1e-6, e_1_minus_freq+1e-6)
         
         cur_class_weights = alpha * self.class_weights + (1-alpha) * cur_class_weights
         weights = (masks * cur_class_weights.view(self.num_classes, bs, 1, 1)).sum(dim=0)
