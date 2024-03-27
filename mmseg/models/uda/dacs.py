@@ -178,7 +178,24 @@ class DACS(UDADecorator):
             
         return pseudo_weight
 
+    def compute_covariance_matrix(batch, eps=1e-5):
+        # 计算特征的均值 (features are expected to be of shape (batch_size, num_features))
+        feature_mean = torch.mean(batch, dim=0, keepdim=True)
+        # 中心化特征
+        batch_centered = batch - feature_mean
+        # 计算协方差矩阵
+        covariance_matrix = torch.mm(batch_centered.T, batch_centered) / (batch_centered.shape[0] - 1)
+        # 添加正则项以保证数值稳定性
+        covariance_matrix += eps * torch.eye(covariance_matrix.shape[0], device=batch.device)
+        return covariance_matrix
 
+    def deep_coral_loss(source_features, target_features):
+        # 计算源特征和目标特征的协方差矩阵
+        source_covariance_matrix = source_features.compute_covariance_matrix
+        target_covariance_matrix = target_features.compute_covariance_matrix
+        # 计算协方差矩阵之间的 Frobenius 范数
+        loss = torch.norm(source_covariance_matrix - target_covariance_matrix, p='fro')
+        return loss
 
     def train_step(self, data_batch, optimizer, **kwargs):
         """The iteration step during training.
@@ -261,7 +278,7 @@ class DACS(UDADecorator):
         clean_loss, clean_log_vars = self._parse_losses(clean_losses)
         log_vars.update(clean_log_vars)
         # clean_loss.backward(retain_graph=self.enable_fdist)
-        clean_loss.backward()
+        # clean_loss.backward()
         if self.print_grad_magnitude:
             params = self.get_model().backbone.parameters()
             seg_grads = [
@@ -330,12 +347,17 @@ class DACS(UDADecorator):
         # Train on mixed images
         mix_losses = self.get_model().forward_train(
             mixed_img, img_metas, mixed_lbl, pseudo_weight, return_feat=True)
-        mix_losses.pop('features')
+        mix_feat = mix_losses.pop('features')
         mix_losses = add_prefix(mix_losses, 'mix')
         mix_loss, mix_log_vars = self._parse_losses(mix_losses)
         log_vars.update(mix_log_vars)
-        mix_loss.backward()
+        # mix_loss.backward()
 
+        coral_loss = self.deep_coral_loss(src_feat.view(src_feat.size(0), -1), mix_feat.view(mix_feat.size(0), -1))
+        lambda_coral = 0.1
+        # 将 Deep CORAL 损失添加到总损失中
+        total_loss = clean_loss + mix_loss + lambda_coral * coral_loss
+        total_loss.backward()
         
         # if self.local_iter % self.debug_img_interval == 0:
         if self.local_iter % 400 == 0:
