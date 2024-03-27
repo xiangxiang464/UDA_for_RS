@@ -178,23 +178,30 @@ class DACS(UDADecorator):
             
         return pseudo_weight
 
-    def compute_covariance_matrix(batch, eps=1e-5):
-        # 计算特征的均值 (features are expected to be of shape (batch_size, num_features))
-        feature_mean = torch.mean(batch, dim=0, keepdim=True)
-        # 中心化特征
-        batch_centered = batch - feature_mean
-        # 计算协方差矩阵
-        covariance_matrix = torch.mm(batch_centered.T, batch_centered) / (batch_centered.shape[0] - 1)
-        # 添加正则项以保证数值稳定性
-        covariance_matrix += eps * torch.eye(covariance_matrix.shape[0], device=batch.device)
-        return covariance_matrix
+    def compute_covariance_matrix(self, batch):
+        """
+        计算给定批次数据的协方差矩阵
+        """
+        batch_size = batch.size(0)
+        feature_dim = batch.size(1)
 
-    def deep_coral_loss(source_features, target_features):
-        # 计算源特征和目标特征的协方差矩阵
-        source_covariance_matrix = source_features.compute_covariance_matrix
-        target_covariance_matrix = target_features.compute_covariance_matrix
-        # 计算协方差矩阵之间的 Frobenius 范数
-        loss = torch.norm(source_covariance_matrix - target_covariance_matrix, p='fro')
+        # 将特征标准化（去均值）
+        batch_mean = torch.mean(batch, dim=0, keepdim=True)
+        batch = batch - batch_mean
+
+        # 计算协方差矩阵
+        cov_matrix = torch.mm(batch.T, batch) / (batch_size - 1)
+        return cov_matrix
+
+    def deep_coral_loss(self, src_feat, tgt_feat):
+        """
+        计算Deep CORAL损失
+        """
+        src_cov = self.compute_covariance_matrix(src_feat)
+        tgt_cov = self.compute_covariance_matrix(tgt_feat)
+
+        # 使用Frobenius范数计算两个协方差矩阵之间的距离
+        loss = torch.norm(src_cov - tgt_cov, p='fro')
         return loss
 
     def train_step(self, data_batch, optimizer, **kwargs):
@@ -231,6 +238,26 @@ class DACS(UDADecorator):
         outputs = dict(
             log_vars=log_vars, num_samples=len(data_batch['img_metas']))
         return outputs
+
+    def flatten_and_align_features(self, src_feat, mix_feat):
+        # 假设src_feat是[4, 128, 64, 64]，mix_feat是[4, 64, 128, 128]
+        # 首先平坦化特征
+        src_feat_flat = src_feat.view(src_feat.size(0), src_feat.size(1), -1)
+        mix_feat_flat = mix_feat.view(mix_feat.size(0), mix_feat.size(1), -1)
+
+        # 检查并调整特征维度以匹配
+        # 这里只是一个示例，具体方法可能需要根据任务调整
+        # 比如，可以通过池化、全连接层或其他方式来降维或升维
+        # 例如，使用平均池化调整src_feat以匹配mix_feat的维度
+        if src_feat_flat.size(-1) > mix_feat_flat.size(-1):
+            # 假设我们要降低维度以匹配mix_feat
+            src_feat_flat = F.adaptive_avg_pool1d(src_feat_flat, output_size=mix_feat_flat.size(-1))
+        elif src_feat_flat.size(-1) < mix_feat_flat.size(-1):
+            # 或者需要升维，这里可能需要不同的方法，视情况而定
+            pass
+
+        return src_feat_flat, mix_feat_flat
+
 
     def forward_train(self, img, img_metas, gt_semantic_seg, target_img,
                       target_img_metas):
@@ -351,11 +378,12 @@ class DACS(UDADecorator):
         mix_losses = add_prefix(mix_losses, 'mix')
         mix_loss, mix_log_vars = self._parse_losses(mix_losses)
         log_vars.update(mix_log_vars)
-        # mix_loss.backward()
-
-        coral_loss = self.deep_coral_loss(src_feat.view(src_feat.size(0), -1), mix_feat.view(mix_feat.size(0), -1))
+        mix_loss.backward()
+        # 调整特征
+        src_feat_flat, mix_feat_flat = self.flatten_and_align_features(src_feat, mix_feat)
+        coral_loss = self.deep_coral_loss(src_feat_flat.view(src_feat.size(0), -1), mix_feat_flat.view(mix_feat.size(0), -1))
         lambda_coral = 0.1
-        # 将 Deep CORAL 损失添加到总损失中
+        # # 将 Deep CORAL 损失添加到总损失中
         total_loss = clean_loss + mix_loss + lambda_coral * coral_loss
         total_loss.backward()
         
