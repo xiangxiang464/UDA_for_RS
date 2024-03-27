@@ -28,7 +28,7 @@ from mmseg.models.utils.dacs_transforms import (denorm, get_class_masks,
 from mmseg.models.utils.visualization import subplotimg
 from mmseg.utils.utils import downscale_label_ratio
 
-
+# 计算梯度向量的规范，默认2，用于判断是否出现梯度爆炸情况
 def calc_grad_magnitude(grads, norm_type=2.0):
     norm_type = float(norm_type)
     if norm_type == math.inf:
@@ -172,13 +172,30 @@ class DACS(UDADecorator):
                 stride=1, padding='same').squeeze(1)
             pseudo_weight = ps_conv / k_size**2
         elif type == None: # used for debug
-            pseudo_weight = torch.ones(pseudo_prob.shape, device=dev)
+            pseudo_weight = torch.ones(pseudo_prob.shape, device=dev) # 权重全部为1
         else:
             raise NotImplementedError
             
         return pseudo_weight
 
+    def compute_covariance_matrix(batch, eps=1e-5):
+        # 计算特征的均值 (features are expected to be of shape (batch_size, num_features))
+        feature_mean = torch.mean(batch, dim=0, keepdim=True)
+        # 中心化特征
+        batch_centered = batch - feature_mean
+        # 计算协方差矩阵
+        covariance_matrix = torch.mm(batch_centered.T, batch_centered) / (batch_centered.shape[0] - 1)
+        # 添加正则项以保证数值稳定性
+        covariance_matrix += eps * torch.eye(covariance_matrix.shape[0], device=batch.device)
+        return covariance_matrix
 
+    def deep_coral_loss(source_features, target_features):
+        # 计算源特征和目标特征的协方差矩阵
+        source_covariance_matrix = source_features.compute_covariance_matrix
+        target_covariance_matrix = target_features.compute_covariance_matrix
+        # 计算协方差矩阵之间的 Frobenius 范数
+        loss = torch.norm(source_covariance_matrix - target_covariance_matrix, p='fro')
+        return loss
 
     def train_step(self, data_batch, optimizer, **kwargs):
         """The iteration step during training.
@@ -206,9 +223,9 @@ class DACS(UDADecorator):
                 DDP, it means the batch size on each GPU), which is used for
                 averaging the logs.
         """
-        optimizer.zero_grad()
+        optimizer.zero_grad() #每次参数更新前梯度归0
         log_vars = self(**data_batch)
-        optimizer.step()
+        optimizer.step() #执行优化算法Adam，根据计算得到的梯度调整模型参数，以最小化损失函数。
 
         log_vars.pop('loss', None)  # remove the unnecessary 'loss'
         outputs = dict(
@@ -261,7 +278,7 @@ class DACS(UDADecorator):
         clean_loss, clean_log_vars = self._parse_losses(clean_losses)
         log_vars.update(clean_log_vars)
         # clean_loss.backward(retain_graph=self.enable_fdist)
-        clean_loss.backward()
+        # clean_loss.backward()
         if self.print_grad_magnitude:
             params = self.get_model().backbone.parameters()
             seg_grads = [
@@ -276,18 +293,25 @@ class DACS(UDADecorator):
                 m.training = False
             if isinstance(m, DropPath):
                 m.training = False
+        # ema_logits这个输出的形状通常是(N, C, H, W)，
+        # 其中：N是批次大小（batchsize），即一次处理的图像数量。
+        # C是类别数，即模型需要区分的目标类别的数量。每个类别的得分
+        # H和W分别是图像的高度和宽度。
         ema_logits = self.get_ema_model().encode_decode(
             target_img, target_img_metas)
-
+        # 这些原始得分（logits）通过softmax函数转换成概率分布，从而使得每个类别的得分被转换为一个介于0到1之间的概率值，这些概率值加起来等于1
         ema_softmax = torch.softmax(ema_logits.detach(), dim=1)
+        # 从ema_softmax中沿着类别维度（dim=1）找到每个像素最大的概率值及其对应的类别索引，实际上是在为每个像素点生成伪标签
         pseudo_prob, pseudo_label = torch.max(ema_softmax, dim=1)
+        # pseudo_prob：包含每个像素点最高概率值的张量，即模型对其所属类别的最大置信度
+        # pseudo_label：包含每个像素点最高概率对应的类别索引的张量，即每个像素点的伪标签
 
         if self.pseudo_kernal_size is None: # global pseudo weight
-            ps_large_p = pseudo_prob.ge(self.pseudo_threshold).long() == 1
-            ps_size = np.size(np.array(pseudo_label.cpu()))
+            ps_large_p = pseudo_prob.ge(self.pseudo_threshold).long() == 1 #每个像素点的预测概率是否大于或等于给定的阈值,是为1，否则为0
+            ps_size = np.size(np.array(pseudo_label.cpu())) # 图像中的像素总数
             pseudo_weight = torch.sum(ps_large_p).item() / ps_size
             pseudo_weight = pseudo_weight * torch.ones(
-                pseudo_prob.shape, device=dev)
+                pseudo_prob.shape, device=dev) # 整张图片正确的概率乘上模型对每个像素点属于各个类别的预测概率
         else: # local pseudo weight
             pseudo_weight = self.generate_local_pseudo_weight(pseudo_label, 
                 pseudo_prob, ema_logits.shape[1], type=self.local_ps_weight_type)
@@ -323,12 +347,17 @@ class DACS(UDADecorator):
         # Train on mixed images
         mix_losses = self.get_model().forward_train(
             mixed_img, img_metas, mixed_lbl, pseudo_weight, return_feat=True)
-        mix_losses.pop('features')
+        mix_feat = mix_losses.pop('features')
         mix_losses = add_prefix(mix_losses, 'mix')
         mix_loss, mix_log_vars = self._parse_losses(mix_losses)
         log_vars.update(mix_log_vars)
-        mix_loss.backward()
+        # mix_loss.backward()
 
+        coral_loss = self.deep_coral_loss(src_feat.view(src_feat.size(0), -1), mix_feat.view(mix_feat.size(0), -1))
+        lambda_coral = 0.1
+        # 将 Deep CORAL 损失添加到总损失中
+        total_loss = clean_loss + mix_loss + lambda_coral * coral_loss
+        total_loss.backward()
         
         # if self.local_iter % self.debug_img_interval == 0:
         if self.local_iter % 400 == 0:

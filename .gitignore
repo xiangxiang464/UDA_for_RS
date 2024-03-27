@@ -5,3 +5,5 @@
 *.gz
 *.pth
 *.7z
+nohup.out
+*.pyc
