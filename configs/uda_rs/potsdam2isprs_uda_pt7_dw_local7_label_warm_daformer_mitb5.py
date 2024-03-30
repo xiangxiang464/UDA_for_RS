@@ -9,7 +9,7 @@ _base_ = [
     # AdamW Optimizer
     '../_base_/schedules/adamw.py',
     # Linear Learning Rate Warmup with Subsequent Linear Decay
-    '../_base_/schedules/poly10warm.py'
+    # '../_base_/schedules/poly10warm.py'
 ]
 # Random Seed
 seed = 0
@@ -30,9 +30,17 @@ uda = dict(
     local_ps_weight_type='label',
 )
 # Optimizer Hyperparameters
+# lr_config = dict(
+#     warmup_iters=1500,
+#     )
 lr_config = dict(
-    warmup_iters=1500,
-    )
+    policy='CosineAnnealing',  # 指定使用余弦退火学习率调度器
+    by_epoch=False,  # 根据你的训练是按照epoch还是iteration，选择True或False
+    warmup='linear',  # 线性预热
+    warmup_iters=1500,  # 预热迭代次数
+    warmup_ratio=0.1,  # 预热期间起始学习率为最大学习率的比例
+    min_lr=0  # 训练结束时的最小学习率
+)
 optimizer_config = None
 optimizer = dict(
     lr=1e-04,
