@@ -23,10 +23,10 @@ model = dict(
 data = dict(samples_per_gpu=4)
 # Modifications to Basic UDA
 uda = dict(
-    alpha=0.9,
-    pseudo_threshold=0.7,
-    dynamic_class_weight=True,
-    pseudo_kernal_size=7,
+    alpha=0.9, #指数移动平均线（EMA）的超参数
+    pseudo_threshold=0.7, # 伪标签阈值，预测的结果大于阈值就判断是正确的伪标签
+    dynamic_class_weight=True, # 设置是否需要使用渐近类权重
+    pseudo_kernal_size=7, # 局部动态质量，观察局部的深度
     local_ps_weight_type='label',
 )
 # Optimizer Hyperparameters
