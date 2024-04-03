@@ -162,7 +162,6 @@ def run_test(config, checkpoint, path=None, aug_test=False, out=None, format_onl
 
     rank, _ = get_dist_info()
     if rank == 0:
-        print("outputs",outputs)
         if out:
             print(f'\nwriting results to {out}')
             mmcv.dump(outputs, out)
@@ -170,9 +169,8 @@ def run_test(config, checkpoint, path=None, aug_test=False, out=None, format_onl
         if format_only:
             dataset.format_results(outputs, **kwargs)
         if eval:
-            print("eval",eval)
-            print("kwargs",kwargs)
-            dataset.evaluate(outputs, eval, **kwargs)
+            evalout = dataset.evaluate(outputs, eval, **kwargs)
+            print("evalout",evalout)
 
 def main():
     args = parse_args()

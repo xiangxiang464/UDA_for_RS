@@ -53,18 +53,20 @@ def upload_file():
         # 为了安全，使用Werkzeug提供的secure_filename方法
         filename = secure_filename(file.filename)
         timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
+        choice = request.form.get('num')
+        # print(choice)
         config_dir = ["configs/uda_rs/potsdam2isprs_uda_pt7_dw_local7_label_warm_daformer_mitb5.py",
                       "configs/uda_rs/isprs2potsdam_uda_pt7_dw_local7_label_warm_daformer_mitb5.py"]
         checkpoint_dir = [
-            "work_dirs/20240326_183914_potsdam2isprs_uda_pt7_dw_local7_label_warm_daformer_mitb5/iter_4000.pth","111"]
+            "work_dirs/20240326_183914_potsdam2isprs_uda_pt7_dw_local7_label_warm_daformer_mitb5/iter_4000.pth",
+            "work_dirs/20240326_183914_potsdam2isprs_uda_pt7_dw_local7_label_warm_daformer_mitb5/iter_4000.pth"]
         # 保存文件
         save_path = os.path.join('data/vaihingen/assets', timestamp, filename)
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         file.save(save_path)
         show_dir = os.path.join('data/vaihingen/assets', timestamp, 'pred')
-
-        run_test("configs/uda_rs/potsdam2isprs_uda_pt7_dw_local7_label_warm_daformer_mitb5.py",
-                 "work_dirs/20240326_183914_potsdam2isprs_uda_pt7_dw_local7_label_warm_daformer_mitb5/iter_4000.pth",
+        run_test(config_dir[int(choice)],
+                 checkpoint_dir[int(choice)],
                  path=os.path.join("assets",timestamp),show_dir=show_dir)
         pred_img = os.path.join(show_dir, filename)
         image = cv2.imread(pred_img)
