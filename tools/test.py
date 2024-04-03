@@ -88,6 +88,92 @@ def parse_args():
     return args
 
 
+def run_test(config, checkpoint, path=None, aug_test=False, out=None, format_only=False, eval=['mIoU', 'mFscore'],
+             show=False, show_dir=None, gpu_collect=False, tmpdir=None, options=None,
+             eval_options=None, launcher='none', opacity=1, gpu_id=0, local_rank=0):
+    if 'LOCAL_RANK' not in os.environ:
+        os.environ['LOCAL_RANK'] = str(local_rank)
+
+    assert out or eval or format_only or show or show_dir, \
+        'Please specify at least one operation (save/eval/format/show the ' \
+        'results / save the results) with the argument "--out", "--eval"' \
+        ', "--format-only", "--show" or "--show-dir"'
+
+    if eval and format_only:
+        raise ValueError('--eval and --format_only cannot be both specified')
+
+    if out is not None and not out.endswith(('.pkl', '.pickle')):
+        raise ValueError('The output file must be a pkl file.')
+
+    cfg = mmcv.Config.fromfile(config)
+    if options is not None:
+        cfg.merge_from_dict(options)
+    cfg = update_legacy_cfg(cfg)
+    if cfg.get('cudnn_benchmark', False):
+        torch.backends.cudnn.benchmark = True
+    if aug_test:
+        cfg.data.test.pipeline[1].img_ratios = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75]
+        cfg.data.test.pipeline[1].flip = True
+    cfg.model.pretrained = None
+    cfg.data.test.test_mode = True
+
+    if launcher == 'none':
+        distributed = False
+    else:
+        distributed = True
+        init_dist(launcher, **cfg.dist_params)
+    if path:
+        cfg.data.test.img_dir = path
+    dataset = build_dataset(cfg.data.test)
+    data_loader = build_dataloader(
+        dataset,
+        samples_per_gpu=1,
+        workers_per_gpu=cfg.data.workers_per_gpu,
+        dist=distributed,
+        shuffle=False)
+
+    cfg.model.train_cfg = None
+    model = build_segmentor(cfg.model, test_cfg=cfg.get('test_cfg'))
+    fp16_cfg = cfg.get('fp16', None)
+    if fp16_cfg is not None:
+        wrap_fp16_model(model)
+    checkpoint = load_checkpoint(model, checkpoint, map_location='cpu',
+                                 revise_keys=[(r'^module\.', ''), ('model.', '')])
+    if 'CLASSES' in checkpoint.get('meta', {}):
+        model.CLASSES = checkpoint['meta']['CLASSES']
+    else:
+        model.CLASSES = dataset.CLASSES
+    if 'PALETTE' in checkpoint.get('meta', {}):
+        model.PALETTE = checkpoint['meta']['PALETTE']
+    else:
+        model.PALETTE = dataset.PALETTE
+
+    efficient_test = False
+    if eval_options is not None:
+        efficient_test = eval_options.get('efficient_test', False)
+
+    if not distributed:
+        model = MMDataParallel(model, device_ids=[gpu_id])
+        outputs = single_gpu_test(model, data_loader, show, show_dir, efficient_test, opacity)
+    else:
+        model = MMDistributedDataParallel(model.cuda(), device_ids=[torch.cuda.current_device()],
+                                          broadcast_buffers=False)
+        outputs = multi_gpu_test(model, data_loader, tmpdir, gpu_collect, efficient_test)
+
+    rank, _ = get_dist_info()
+    if rank == 0:
+        print("outputs",outputs)
+        if out:
+            print(f'\nwriting results to {out}')
+            mmcv.dump(outputs, out)
+        kwargs = {} if eval_options is None else eval_options
+        if format_only:
+            dataset.format_results(outputs, **kwargs)
+        if eval:
+            print("eval",eval)
+            print("kwargs",kwargs)
+            dataset.evaluate(outputs, eval, **kwargs)
+
 def main():
     args = parse_args()
 
@@ -188,3 +274,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
