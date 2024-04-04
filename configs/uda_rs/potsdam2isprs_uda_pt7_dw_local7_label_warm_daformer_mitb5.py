@@ -20,7 +20,7 @@ model = dict(
     )
 )
 # Modifications to batch_size
-data = dict(samples_per_gpu=4)
+data = dict(samples_per_gpu=1)
 # Modifications to Basic UDA
 uda = dict(
     alpha=0.9, #指数移动平均线（EMA）的超参数

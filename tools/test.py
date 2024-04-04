@@ -171,6 +171,8 @@ def run_test(config, checkpoint, path=None, aug_test=False, out=None, format_onl
         if eval:
             evalout = dataset.evaluate(outputs, eval, **kwargs)
             print("evalout",evalout)
+            return evalout
+    return None
 
 def main():
     args = parse_args()

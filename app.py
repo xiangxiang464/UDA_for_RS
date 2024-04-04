@@ -2,6 +2,8 @@ import base64
 import json
 import os
 import time
+import math
+
 from io import BytesIO
 
 import cv2
@@ -65,7 +67,7 @@ def upload_file():
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         file.save(save_path)
         show_dir = os.path.join('data/vaihingen/assets', timestamp, 'pred')
-        run_test(config_dir[int(choice)],
+        eval_out = run_test(config_dir[int(choice)],
                  checkpoint_dir[int(choice)],
                  path=os.path.join("assets",timestamp),show_dir=show_dir)
         pred_img = os.path.join(show_dir, filename)
@@ -74,9 +76,20 @@ def upload_file():
         # 发送图片文件给前端
         encoded_image = base64.b64encode(buffer).decode('utf-8')
 
+        # 从原始数据提取IoU和Acc值，并替换nan值为None
+        iou_data = {k.split('.')[-1]: round(v, 4) if not (isinstance(v, float) and math.isnan(v)) else None for k, v in
+                    eval_out.items() if k.startswith('IoU.')}
+        acc_data = {k.split('.')[-1]: round(v, 4) if not (isinstance(v, float) and math.isnan(v)) else None for k, v in
+                    eval_out.items() if k.startswith('Acc.')}
+
+        # 结果列表
+        organized_data = [iou_data, acc_data]
+
+        print(organized_data)
         # 构建JSON响应
         response = {
             'message': 'Image loaded successfully',
+            'eval': organized_data,
             'image_base64': encoded_image
         }
 
