@@ -23,20 +23,6 @@ def hello_world():
     return 'Hello World!'
 
 
-@app.route('/get_image', methods=['POST','GET'])
-def get_photo():
-    timestamp = request.form['timestamp']
-    path = "assets/"+ timestamp
-    checkpoint = request.json.get("checkpoint")
-    config = request.json.get("config")
-    show_dir = "assets/"+ timestamp +"/pred"
-    data = {
-        "name": "mjl",
-        "age": 21,
-    }
-    res_json = json.dumps(data)
-    return res_json, 200, {"Content-Type":"application/json"}
-
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 def allowed_file(filename):
     return '.' in filename and \
